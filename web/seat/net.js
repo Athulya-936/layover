@@ -1,7 +1,7 @@
 // WebSocket client for the seat: server messages → bus, status/haptic → server.
 import { MSG } from '../shared/contracts.js';
 
-export function createNet(bus, { getPhase }) {
+export function createNet(bus, { getPhase, getExtra = () => ({}) }) {
   let ws = null;
   let lastState = null;
 
@@ -21,12 +21,16 @@ export function createNet(bus, { getPhase }) {
       else if (t === MSG.CLOCK) bus.emit('clock', p);
       else if (t === MSG.JUMP) bus.emit('jump', p);
       else if (t === 'yoke') bus.emit('yoke:presence', p);
+      else if (t === MSG.FEATURE) bus.emit('feature', p);
+      else if (t === MSG.TOWER) bus.emit('tower', p);
+      else if (t === MSG.CLIPS) bus.emit('clips', p);
+      else if (t === MSG.ROUTE_RESULT) bus.emit('routeResult', p);
     };
   }
 
   bus.on('flight:state', s => { lastState = s; });
   bus.on('flight:touchdown', td => send({ t: MSG.HAPTIC, ms: td.grade === 'BUTTER' ? 120 : td.grade === 'GO_AROUND' ? 500 : 300 }));
-  setInterval(() => send({ t: MSG.STATUS, phase: getPhase(), state: lastState }), 500);
+  setInterval(() => send({ t: MSG.STATUS, phase: getPhase(), state: lastState, ...getExtra() }), 500);
 
   connect();
   return { send };

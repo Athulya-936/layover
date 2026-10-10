@@ -1,0 +1,18 @@
+[
+  { "name": "Western Ghats", "emoji": "⛰️", "lat": 11.6, "lon": 76.0, "radiusKm": 120,
+    "fact": "A UNESCO World Heritage mountain range that is older than the Himalayas, and one of the world's biodiversity hotspots." },
+  { "name": "Lakshadweep", "emoji": "🏝️", "lat": 10.57, "lon": 72.64, "radiusKm": 350,
+    "fact": "36 coral islands in the Arabian Sea: India's smallest union territory." },
+  { "name": "The Arabian Sea", "emoji": "🌊", "lat": 18.3, "lon": 66.2, "radiusKm": 400, "badge": "Crossed the Arabian Sea",
+    "fact": "Sailors have ridden the monsoon winds across this sea between India and Arabia for more than 2,000 years." },
+  { "name": "Ras al Hadd, Oman", "emoji": "🐢", "lat": 22.53, "lon": 59.80, "radiusKm": 80,
+    "fact": "The easternmost tip of the Arabian Peninsula, where endangered green turtles come ashore to nest." },
+  { "name": "Muscat, Oman", "emoji": "🕌", "lat": 23.59, "lon": 58.41, "radiusKm": 80,
+    "fact": "Oman's capital. Its Sultan Qaboos Grand Mosque holds one of the largest hand-woven carpets in the world." },
+  { "name": "Jebel Shams", "emoji": "🏔️", "lat": 23.24, "lon": 57.26, "radiusKm": 120,
+    "fact": "The 'Mountain of the Sun': about 3,000 m tall, the highest peak in Oman's Hajar Mountains." },
+  { "name": "Fujairah, UAE", "emoji": "⛵", "lat": 25.12, "lon": 56.33, "radiusKm": 60,
+    "fact": "The only one of the seven emirates whose whole coastline faces the Gulf of Oman instead of the Persian Gulf." },
+  { "name": "Burj Khalifa, Dubai", "emoji": "🏙️", "lat": 25.197, "lon": 55.274, "radiusKm": 60,
+    "fact": "At 828 m, the world's tallest building since 2010. Look for it on your approach!" }
+]

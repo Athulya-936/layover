@@ -1,5 +1,5 @@
 // Intro: Start (unlocks audio) → Captain Vee waves → passport → VISA APPROVED stamp → boarding pass.
-export function createIntro({ airports, onDone, onStart }) {
+export function createIntro({ airports, onDone, onStart, onPick }) {
   const el = document.createElement('div');
   el.className = 'overlay intro'; el.hidden = true;
   document.body.appendChild(el);
@@ -10,12 +10,14 @@ export function createIntro({ airports, onDone, onStart }) {
 
   function show(route) {
     done = false; clear();
-    const A = airports[route.from] || { city: route.from }, B = airports[route.to] || { city: route.to };
+    const cityOf = iata => (airports[iata]?.city || iata).split('/')[0].trim();
+    const A = { city: cityOf(route.from) }, B = { city: cityOf(route.to) };
     el.innerHTML = `
       <div class="intro-start">
         <div class="logo">VALKYRIE</div>
         <div class="tag">Fly your flight · ${A.city} → ${B.city}</div>
         <button class="start">▶ Start</button>
+        ${onPick ? '<button class="pick">🌍 Change flight: fly from anywhere</button>' : ''}
       </div>
       <div class="intro-stage" hidden>
         <div class="vee">
@@ -40,6 +42,7 @@ export function createIntro({ airports, onDone, onStart }) {
       <div class="intro-foot">Powered by The Visa Guy</div>`;
     el.hidden = false;
     el.querySelector('.start').onclick = () => { onStart && onStart(); run(); };
+    if (onPick) el.querySelector('.pick').onclick = onPick;
   }
 
   function run() {

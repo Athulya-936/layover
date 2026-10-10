@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0a1224">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗼</text></svg>">
+<title>Valkyrie Tower</title>
+<style>
+  :root { --bg:#0a1224; --panel:#121d38; --line:#2a3b66; --ink:#eef3ff; --dim:#93a3c8; --amber:#ffb547; --go:#3ddc97; --red:#ff5c6c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:500 15px/1.4 system-ui, sans-serif; padding:16px; max-width:900px; margin-inline:auto; }
+  h1 { margin:0 0 4px; font-size:18px; letter-spacing:.2em; color:var(--amber); }
+  #conn { float:right; font-size:12px; letter-spacing:0; }
+  .sub { color:var(--dim); margin:0 0 12px; font-size:13px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  h2 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.15em; color:var(--dim); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; }
+  button { font:700 14px system-ui; padding:11px 13px; border-radius:10px; border:1px solid var(--line); background:#1a2a52; color:var(--ink); cursor:pointer; }
+  button:disabled { opacity:.4; }
+  button.dev { background:#3a2a10; }
+  #ptt { width:100%; padding:22px; font-size:20px; background:var(--amber); color:#1a1200; border:0; touch-action:none; user-select:none; -webkit-user-select:none; }
+  #ptt.rec { background:var(--red); color:#fff; }
+  .say { display:flex; gap:8px; margin-top:10px; }
+  .say input { flex:1; font:500 16px system-ui; padding:11px; border-radius:10px; border:1px solid var(--line); background:#0d1730; color:var(--ink); }
+  pre { margin:0; white-space:pre-wrap; font:13px/1.5 ui-monospace, monospace; color:var(--dim); }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:8px 4px; border-top:1px solid var(--line); vertical-align:middle; }
+  td.id { font:700 13px ui-monospace, monospace; color:var(--amber); width:90px; }
+  td.txt { color:var(--ink); font-size:14px; }
+  td.act { white-space:nowrap; text-align:right; }
+  td.act button { padding:8px 10px; }
+  .has { color:var(--go); font-size:12px; }
+  .rec-on { background:var(--red) !important; color:#fff; }
+  #rb { max-height:140px; overflow:auto; }
+</style>
+</head>
+<body>
+<h1>VALKYRIE TOWER <span id="conn">○</span></h1>
+<p class="sub">Be the control tower: talk to the passenger live, or record the official lines once so the seat plays your voice instead of the robot one.</p>
+
+<section><h2>Live flight</h2><pre id="status">waiting for the seat…</pre></section>
+
+<section>
+  <h2>Push to talk</h2>
+  <button id="ptt">🎙️ Hold to talk to the cockpit</button>
+  <div class="say"><input id="text" placeholder="…or type a message for the seat to speak"><button id="send">Send</button></div>
+  <p class="sub" id="pttMsg" style="margin:8px 0 0"></p>
+</section>
+
+<section><h2>Clearances (route-aware)</h2><div class="row" id="lines"></div></section>
+
+<section><h2>Passenger read-backs</h2><pre id="rb">none yet</pre></section>
+
+<section>
+  <h2>Record the tower lines</h2>
+  <p class="sub">Read the line, then stop. The seat plays it through the radio filter from then on. Clips are used on <b>every</b> route, so record them for your demo route.</p>
+  <table id="clips"></table>
+</section>
+
+<script type="module">
+import { CONFIG } from '../shared/config.js';
+import { MSG, UNITS } from '../shared/contracts.js';
+import { LINES, fill, setAirports } from '../seat/audio/lines.js';
+const $ = id => document.getElementById(id);
+const DEVIATION = new Set(['high', 'low', 'fast', 'slow', 'centre']);
+let ws, clock = null, seat = null, presence = {}, clips = {}, airportsLoaded = false;
+let route = CONFIG.ROUTES.find(r => r.id === CONFIG.DEFAULT_ROUTE);
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+
+fetch('../data/airports.json').then(r => r.json()).then(list => {
+  setAirports(Object.fromEntries(list.map(a => [a.iata, a]))); airportsLoaded = true; renderLines(); renderClips();
+});
+
+// ---------- live: line buttons ----------
+function renderLines() {
+  const box = $('lines'); box.innerHTML = '';
+  for (const id of Object.keys(LINES)) {
+    const b = document.createElement('button');
+    b.textContent = id; b.title = fill(LINES[id], CONFIG, route, false);
+    if (DEVIATION.has(id)) b.className = 'dev';
+    b.onclick = () => send({ t: MSG.TOWER, kind: 'line', id });
+    box.appendChild(b);
+  }
+}
+
+// ---------- live: typed message ----------
+const sendText = () => { const t = $('text').value.trim(); if (t) { send({ t: MSG.TOWER, kind: 'text', text: t }); $('text').value = ''; } };
+$('send').onclick = sendText;
+$('text').addEventListener('keydown', e => { if (e.key === 'Enter') sendText(); });
+
+// ---------- recording helper (push-to-talk + clip recorder) ----------
+let stream = null;
+async function recorder() {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('No microphone API: open this page over https://');
+  stream = stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find(m => window.MediaRecorder?.isTypeSupported?.(m)) || '';
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const done = new Promise(res => { rec.onstop = () => res(new Blob(chunks, { type: (rec.mimeType || mime || 'audio/webm').split(';')[0] })); });
+  rec.start();
+  return { stop: () => { rec.stop(); return done; } };
+}
+const toB64 = blob => new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.readAsDataURL(blob); });
+
+// ---------- push to talk ----------
+let ptt = null, pttStart = 0;
+const ptb = $('ptt');
+ptb.addEventListener('pointerdown', async e => {
+  e.preventDefault(); ptb.setPointerCapture(e.pointerId);
+  try { ptt = await recorder(); pttStart = Date.now(); ptb.classList.add('rec'); ptb.textContent = '🔴 Talking… release to send'; $('pttMsg').textContent = ''; }
+  catch (err) { $('pttMsg').textContent = err.message; }
+});
+const endPtt = async () => {
+  if (!ptt) return;
+  const r = ptt; ptt = null;
+  ptb.classList.remove('rec'); ptb.textContent = '🎙️ Hold to talk to the cockpit';
+  const blob = await r.stop();
+  if (Date.now() - pttStart < 400) { $('pttMsg').textContent = 'Too short: hold the button while you talk.'; return; }
+  send({ t: MSG.TOWER, kind: 'voice', mime: blob.type, b64: await toB64(blob) });
+  $('pttMsg').textContent = `Sent ${(blob.size / 1024).toFixed(0)} KB voice note.`;
+};
+ptb.addEventListener('pointerup', endPtt);
+ptb.addEventListener('pointercancel', endPtt);
+
+// ---------- clip recorder ----------
+async function loadClips() { try { clips = (await fetch('/api/clips').then(r => r.json())).clips || {}; } catch { clips = {}; } renderClips(); }
+let recording = null;   // {id, r}
+function renderClips() {
+  const tb = $('clips'); tb.innerHTML = '';
+  for (const id of Object.keys(LINES)) {
+    const tr = document.createElement('tr');
+    const has = clips[id];
+    tr.innerHTML = `<td class="id">${id}</td><td class="txt">${airportsLoaded ? fill(LINES[id], CONFIG, route, false) : LINES[id]}${has ? ` <span class="has">● recorded</span>` : ''}</td>
+      <td class="act"><button class="play" ${has ? '' : 'disabled'}>▶</button> <button class="rec">${recording?.id === id ? '■ Stop' : '● Rec'}</button> <button class="del" ${has ? '' : 'disabled'}>🗑</button></td>`;
+    const recBtn = tr.querySelector('.rec');
+    if (recording?.id === id) recBtn.classList.add('rec-on');
+    recBtn.onclick = async () => {
+      if (recording && recording.id !== id) return;
+      if (!recording) {
+        try { recording = { id, r: await recorder() }; } catch (e) { alert(e.message); return; }
+        renderClips(); return;
+      }
+      const blob = await recording.r.stop(); recording = null;
+      const res = await fetch(`/api/clips/${id}`, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob }).then(r => r.json()).catch(e => ({ error: e.message }));
+      if (res.error) alert(res.error); else clips = res.clips;
+      renderClips();
+    };
+    tr.querySelector('.play').onclick = () => new Audio(`../seat/audio/clips/${clips[id]}?v=${Date.now()}`).play();
+    tr.querySelector('.del').onclick = async () => {
+      if (!confirm(`Delete the recording for "${id}"? The seat goes back to text-to-speech.`)) return;
+      const res = await fetch(`/api/clips/${id}`, { method: 'DELETE' }).then(r => r.json());
+      clips = res.clips || {}; renderClips();
+    };
+    tb.appendChild(tr);
+  }
+}
+
+// ---------- socket ----------
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws?role=tower`);
+  ws.onopen = () => { $('conn').textContent = '● connected'; $('conn').style.color = 'var(--go)'; };
+  ws.onclose = () => { $('conn').textContent = '○ reconnecting'; $('conn').style.color = ''; setTimeout(connect, 1000); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === MSG.CLOCK) {
+      const changed = !clock || clock.routeId !== m.routeId;
+      clock = m;
+      route = CONFIG.ROUTES.find(r => r.id === m.routeId) || m.route || route;
+      if (changed) { renderLines(); renderClips(); }
+    } else if (m.t === MSG.STATUS) seat = m;
+    else if (m.t === 'presence') presence = m;
+    else if (m.t === MSG.READBACK) {
+      const line = `${new Date().toLocaleTimeString()}  ${m.ok ? '✅' : '❌'} ${m.id}: “${m.heard || '(nothing heard)'}”`;
+      $('rb').textContent = line + '\n' + ($('rb').textContent === 'none yet' ? '' : $('rb').textContent);
+    }
+    render();
+  };
+}
+function render() {
+  const s = seat && seat.state;
+  $('status').textContent = [
+    `route    ${route.flightNo} · ${route.from} → ${route.to} · rwy ${route.depRwy} → ${route.arrRwy}`,
+    `devices  seat ${presence.seat ?? '?'} · yoke ${presence.yoke ?? '?'} · tower ${presence.tower ?? '?'}`,
+    `phase    ${seat ? seat.phase : '—'}`,
+    s ? `flight   ${Math.round(s.speedMs * UNITS.KT)} kt · ${Math.round(s.aglM * UNITS.FT).toLocaleString()} ft · ${Math.round(s.vsMs * UNITS.FPM)} fpm · hdg ${Math.round(s.headingDeg)}°${s.rwy ? ` · ${Math.round(-s.rwy.alongM)} m to threshold, ${Math.round(s.rwy.crossM)} m off centre` : ''}` : 'flight   —',
+  ].join('\n');
+}
+renderLines(); loadClips(); connect();
+</script>
+</body>
+</html>

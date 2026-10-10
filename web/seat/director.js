@@ -5,6 +5,7 @@ import { line } from './audio/lines.js';
 const ORDER = [PHASE.INTRO, PHASE.GATE, PHASE.TAKEOFF, PHASE.CRUISE, PHASE.DESCENT_CALL, PHASE.APPROACH, PHASE.LANDED, PHASE.CERTIFICATE];
 const MISSED_TAKEOFF_PROGRESS = 0.03;   // passenger arrived after the real takeoff
 const APPROACH_AUTO_MS = 60000;
+const HOLD_ALT_M = 150, HOLD_MS = 20000;   // cruise mission while hand-flying: hold altitude ±500 ft for 20 s
 
 export function createDirector({ bus, sim, config }) {
   let route = config.ROUTES.find(r => r.id === config.DEFAULT_ROUTE);
@@ -13,6 +14,8 @@ export function createDirector({ bus, sim, config }) {
   let ready = false;
   let practice = false;          // takeoff flown from cruise via "Practice takeoff"
   let cruising = false;          // sim currently in cruise mode
+  let controlling = false;       // passenger hand-flying during cruise
+  let view = 'chase';            // passenger's camera choice: 'chase' | 'cockpit'
   let approachTimer = null;
   let rings = { passed: new Set(), total: 0 };
   const said = new Set();        // one-shot ATC lines per flight
@@ -41,6 +44,7 @@ export function createDirector({ bus, sim, config }) {
     const prev = phase;
     phase = next;
     clearTimeout(approachTimer);
+    if (controlling && next !== PHASE.DESCENT_CALL) setControl(false);
     enter(next, prev);
     persist();
     bus.emit('phase', { phase: next, prev, why, route, practice });
@@ -53,12 +57,12 @@ export function createDirector({ bus, sim, config }) {
         break;
       case PHASE.GATE:
         sim.spawnOnRunway(route.from, route.depRwy);
-        sim.setCamera('chase');
+        sim.setCamera(view);
         cruising = false;
         break;
       case PHASE.TAKEOFF:
         sim.spawnOnRunway(route.from, route.depRwy);
-        sim.setCamera('chase');
+        sim.setCamera(view);
         cruising = false;
         atc('gate', !practice);
         break;
@@ -74,7 +78,7 @@ export function createDirector({ bus, sim, config }) {
         cruising = false;
         rings = { passed: new Set(), total: 0 };
         sim.spawnOnApproach(route.to, route.arrRwy, 8000);
-        sim.setCamera('chase');
+        sim.setCamera(view);
         said.delete('land');
         atc('land');
         break;
@@ -108,7 +112,7 @@ export function createDirector({ bus, sim, config }) {
     const first = !clock;
     clock = c;
     if (c.routeId && c.routeId !== route.id) {
-      route = config.ROUTES.find(r => r.id === c.routeId) || route;
+      route = config.ROUTES.find(r => r.id === c.routeId) || c.route || route;   // c.route: custom picker
       save = load(route.id) || { routeId: route.id, phase: PHASE.INTRO, stars: 0, badges: [], kid: save.kid, touchdown: null };
       bus.emit('route', route);
     }
@@ -127,7 +131,7 @@ export function createDirector({ bus, sim, config }) {
       case PHASE.CRUISE: {
         const p = clamp01(c.progress);
         if (cruising) sim.setCruiseProgress(p);
-        if (p >= 0.5) { atc('handoff'); badge('Crossed the Arabian Sea'); }
+        if (p >= 0.5) atc('handoff');
         if (c.nowMs >= c.arrMs - config.TOD_MIN_BEFORE_ARR * 60000) setPhase(PHASE.DESCENT_CALL);
         break;
       }
@@ -135,6 +139,15 @@ export function createDirector({ bus, sim, config }) {
         if (cruising) sim.setCruiseProgress(clamp01(c.progress));
         break;
     }
+  }
+
+  let hold = null;                // altitude-hold mission state while hand-flying
+  function setControl(on) {
+    controlling = !!on && cruising;
+    sim.takeControl(controlling);
+    bus.emit('control', { on: controlling });
+    hold = controlling && !save.badges.includes('Steady hands') ? { alt: null, since: 0 } : null;
+    if (hold) bus.emit('mission', { text: 'Mission: hold your altitude steady for 20 seconds.' });
   }
 
   function takeApproach(why) { if (phase === PHASE.DESCENT_CALL) setPhase(PHASE.APPROACH, why); }
@@ -149,6 +162,14 @@ export function createDirector({ bus, sim, config }) {
     },
     takeApproach() { takeApproach('tap'); },
     practiceTakeoff() { if (phase === PHASE.CRUISE) { practice = true; setPhase(PHASE.TAKEOFF, 'practice'); } },
+    toggleControl() {
+      if (phase === PHASE.CRUISE || phase === PHASE.DESCENT_CALL) setControl(!controlling);
+    },
+    toggleCamera() {
+      view = view === 'cockpit' ? 'chase' : 'cockpit';
+      if (phase !== PHASE.CERTIFICATE) sim.setCamera(view);
+      bus.emit('camera', { kind: view });
+    },
     toggleKid(on = !save.kid) { save.kid = on; sim.setKidMode(on); bus.emit('kid', { on }); persist(); },
     retry() {
       if (phase === PHASE.TAKEOFF) sim.spawnOnRunway(route.from, route.depRwy);
@@ -179,9 +200,16 @@ export function createDirector({ bus, sim, config }) {
       if (phase === PHASE.GATE) actions.ready();
       else if (phase === PHASE.DESCENT_CALL) actions.takeApproach();
     } else if (id === 'reset') actions.retry();
+    else if (id === 'control') actions.toggleControl();
+    else if (id === 'camera') actions.toggleCamera();
   });
 
   bus.on('flight:state', s => {
+    if (hold && controlling && s.mode === 'free') {
+      const now = performance.now();
+      if (hold.alt === null || Math.abs(s.altM - hold.alt) > HOLD_ALT_M) { hold.alt = s.altM; hold.since = now; }
+      else if (now - hold.since > HOLD_MS) { hold = null; badge('Steady hands'); bus.emit('mission', { text: 'Mission complete: rock-steady altitude!', done: true }); }
+    }
     if (phase === PHASE.TAKEOFF && s.throttle > 0.5) atc('takeoff', !practice || !said.has('takeoff'));
   });
   bus.on('flight:liftoff', () => { if (phase === PHASE.TAKEOFF) badge('Wheels up'); });
@@ -189,6 +217,10 @@ export function createDirector({ bus, sim, config }) {
     if (phase !== PHASE.TAKEOFF) return;
     if (aglM >= 300) { practice = false; setPhase(PHASE.CRUISE); atc('departure'); }
   });
+  bus.on('landmark', ({ badge: b }) => { if (b) badge(b); });
+  bus.on('readback:ok', () => { atc('readback', false); badge('Radio pro'); });
+  // Live tower can fire any line from the table (lines are route-aware, so it always sounds right).
+  bus.on('tower', m => { if (m.kind === 'line' && m.id) atc(m.id, false); });
   bus.on('flight:ring', ({ index, total }) => {
     rings.passed.add(index); rings.total = total;
     if (total && rings.passed.size >= total) badge('Ring master');
@@ -217,6 +249,7 @@ export function createDirector({ bus, sim, config }) {
     get route() { return route; },
     get clock() { return clock; },
     get save() { return save; },
+    get controlling() { return controlling; },
     actions,
   };
 }

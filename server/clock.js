@@ -25,6 +25,7 @@ function createClock({ routes, defaultRoute, todMin = 30, onChange }) {
       depMs, arrMs, nowMs, warp,
       progress: (nowMs - depMs) / (arrMs - depMs),
       routeId: route.id,
+      route,                 // full route, so seats can fly custom (non-featured) routes
     };
   }
 
@@ -37,8 +38,9 @@ function createClock({ routes, defaultRoute, todMin = 30, onChange }) {
     changed();
   }
 
-  function setRoute(routeId) {
-    const r = routes.find(x => x.id === routeId);
+  /** @param r routeId of a featured route, or a full route object (custom picker) */
+  function setRoute(r) {
+    if (typeof r === 'string') r = routes.find(x => x.id === r);
     if (!r) return false;
     route = r;
     reset();
@@ -67,7 +69,7 @@ function createClock({ routes, defaultRoute, todMin = 30, onChange }) {
   reset();
   setInterval(changed, 1000);
 
-  return { snapshot, setWarp, setRoute, jump, reset: () => { warp = 1; reset(); changed(); } };
+  return { snapshot, setWarp, setRoute, jump, get route() { return route; }, reset: () => { warp = 1; reset(); changed(); } };
 }
 
 module.exports = { createClock };

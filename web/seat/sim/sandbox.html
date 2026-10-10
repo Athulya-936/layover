@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valkyrie sim sandbox</title>
+<!-- Person A's solo test page: no B code except the frozen shared/ files. -->
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+  html, body, #cesium { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #hud { position: fixed; left: 10px; top: 10px; color: #0f0; font: 13px/1.4 monospace; background: rgba(0,0,0,.6); padding: 8px 10px; white-space: pre; z-index: 10; }
+  #log { position: fixed; right: 10px; top: 10px; color: #ff0; font: 13px/1.4 monospace; background: rgba(0,0,0,.6); padding: 8px 10px; max-height: 50vh; overflow: auto; white-space: pre; z-index: 10; }
+</style>
+</head>
+<body>
+<div id="cesium"></div>
+<div id="hud">loading…</div>
+<div id="log"></div>
+<script type="module">
+import { CONFIG } from '../../shared/config.js';
+import { createBus } from '../../shared/bus.js';
+import { createSim } from './sim.js';
+
+const bus = createBus();
+const log = m => { const el = document.getElementById('log'); el.textContent = m + '\n' + el.textContent.slice(0, 2000); };
+for (const ev of ['world:ready', 'flight:liftoff', 'flight:altitude', 'flight:touchdown', 'flight:ring', 'flight:deviation'])
+  bus.on(ev, d => log(`${ev} ${JSON.stringify(d)}`));
+
+const airports = await (await fetch('../../data/airports.json')).json();
+const sim = await createSim({ bus, containerId: 'cesium', config: CONFIG, airports });
+const route = CONFIG.ROUTES.find(r => r.id === CONFIG.DEFAULT_ROUTE);
+window.sim = sim; // poke from the console
+
+// Keyboard: W/S pitch, A/D roll, Shift/Ctrl throttle, B brake
+const keys = new Set();
+let throttle = 0, kid = false;
+addEventListener('keydown', e => {
+  keys.add(e.code);
+  if (e.code === 'Digit1') sim.spawnOnRunway(route.from, route.depRwy);
+  if (e.code === 'Digit2') sim.spawnOnApproach(route.to, route.arrRwy);
+  if (e.code === 'KeyC') sim.startCruise(route, 0.5);
+  if (e.code === 'KeyT') sim.takeControl(true);
+  if (e.code === 'KeyY') sim.takeControl(false);
+  if (e.code === 'KeyK') { kid = !kid; sim.setKidMode(kid); log('kid ' + kid); }
+  if (e.code === 'KeyV') sim.setCamera(e.shiftKey ? 'orbit' : 'cockpit');
+  if (e.code === 'KeyX') sim.setCamera('chase');
+});
+addEventListener('keyup', e => keys.delete(e.code));
+setInterval(() => {
+  if (keys.has('ShiftLeft') || keys.has('ShiftRight')) throttle = Math.min(1, throttle + 0.02);
+  if (keys.has('ControlLeft') || keys.has('ControlRight')) throttle = Math.max(0, throttle - 0.02);
+  sim.setInput({
+    pitch: (keys.has('KeyS') ? 1 : 0) - (keys.has('KeyW') ? 1 : 0),   // S = pull back = nose up
+    roll: (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0),
+    throttle, brake: keys.has('KeyB'), src: 'keys',
+  });
+}, 1000 / 60);
+
+bus.on('flight:state', s => {
+  document.getElementById('hud').textContent =
+`1 runway  2 approach  C cruise  T/Y take/release control  K kid  V cockpit  X chase
+W/S pitch  A/D roll  Shift/Ctrl throttle  B brake        kid=${kid}
+spd ${(s.speedMs * 1.944).toFixed(0)} kt   alt ${(s.aglM * 3.281).toFixed(0)} ft agl   vs ${(s.vsMs * 196.85).toFixed(0)} fpm
+hdg ${s.headingDeg.toFixed(0)}  pitch ${s.pitchDeg.toFixed(1)}  roll ${s.rollDeg.toFixed(1)}  thr ${(s.throttle * 100).toFixed(0)}%  ground=${s.onGround}  mode=${s.mode}
+${s.rwy ? `runway along ${s.rwy.alongM.toFixed(0)} m  cross ${s.rwy.crossM.toFixed(0)} m` : ''}`;
+});
+
+sim.spawnOnRunway(route.from, route.depRwy);
+</script>
+</body>
+</html>

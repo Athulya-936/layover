@@ -15,6 +15,10 @@ export function initHud(bus) {
       <div class="tape"><div class="v" data-k="vs">0</div><div class="u">FPM</div></div>
       <div class="tape"><div class="v" data-k="hdg">000</div><div class="u">HDG</div></div>
       <div class="tape thr"><div class="bar"><i></i></div><div class="u">THR</div></div>
+    </div>
+    <div class="hud-btns">
+      <button class="hb-control" hidden title="T">🕹️ Take the controls</button>
+      <button class="hb-camera" title="V">🎥 Cockpit view</button>
     </div>`;
   document.body.appendChild(el);
   const sub = document.createElement('div');
@@ -25,7 +29,20 @@ export function initHud(bus) {
   const spd = q('spd'), alt = q('alt'), vs = q('vs'), hdg = q('hdg'), thr = el.querySelector('.bar i');
   let latest = null, subTimer = null;
 
+  const ctlBtn = el.querySelector('.hb-control'), camBtn = el.querySelector('.hb-camera');
+  ctlBtn.onclick = () => bus.emit('button', { id: 'control', src: 'screen' });
+  camBtn.onclick = () => bus.emit('button', { id: 'camera', src: 'screen' });
+  bus.on('control', ({ on }) => {
+    ctlBtn.textContent = on ? '🤖 Back to autopilot' : '🕹️ Take the controls';
+    ctlBtn.classList.toggle('on', on);
+    el.querySelector('.ph').textContent = on ? 'CRUISE · YOU HAVE CONTROL' : LABEL[curPhase] || '';
+  });
+  bus.on('camera', ({ kind }) => { camBtn.textContent = kind === 'cockpit' ? '🎥 Chase view' : '🎥 Cockpit view'; });
+
+  let curPhase = null;
   bus.on('phase', ({ phase }) => {
+    curPhase = phase;
+    ctlBtn.hidden = phase !== 'CRUISE' && phase !== 'DESCENT_CALL';
     el.hidden = !SHOW.has(phase);
     el.querySelector('.ph').textContent = LABEL[phase] || '';
     el.querySelector('.rings').textContent = '';

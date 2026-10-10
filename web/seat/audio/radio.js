@@ -3,6 +3,14 @@ let ctx = null;
 const clipCache = new Map();   // id -> AudioBuffer | null
 const queue = [];
 let busy = false;
+let clipFiles = null;          // {id: 'takeoff.webm'} from /api/clips (recorded on /tower), null = unknown
+let bus = null;
+
+async function refreshClips(files) {
+  clipCache.clear();
+  if (files) { clipFiles = files; return; }
+  try { clipFiles = (await fetch('/api/clips').then(r => r.json())).clips || {}; } catch { clipFiles = null; }
+}
 
 export function unlockAudio() {
   try {
@@ -39,8 +47,10 @@ function noiseBurst(ms = 120, vol = 0.25) {
 async function loadClip(id) {
   if (clipCache.has(id)) return clipCache.get(id);
   let buf = null;
+  const file = clipFiles ? clipFiles[id] : `${id}.mp3`;
+  if (!file) { clipCache.set(id, null); return null; }
   try {
-    const res = await fetch(`./audio/clips/${id}.mp3`);
+    const res = await fetch(`./audio/clips/${file}`);
     if (res.ok && ctx) buf = await ctx.decodeAudioData(await res.arrayBuffer());
   } catch { buf = null; }
   clipCache.set(id, buf);
@@ -69,13 +79,22 @@ function speak(text) {
   });
 }
 
-async function playOne({ id, text, speech }) {
+async function decodeB64(b64) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return ctx.decodeAudioData(bytes.buffer);
+}
+
+async function playOne({ id, text, speech, b64 }) {
   if (ctx && ctx.state === 'suspended') { try { await ctx.resume(); } catch { /* ignore */ } }
   await noiseBurst();
-  const buf = ctx ? await loadClip(id) : null;
+  let buf = null;
+  if (b64 && ctx) { try { buf = await decodeB64(b64); } catch (e) { console.warn('[radio] voice note failed', e); } }
+  else if (id && ctx) buf = await loadClip(id);
   if (buf) await playBuffer(buf);
-  else await speak(speech || text);
+  else if (speech || text) await speak(speech || text);
   await noiseBurst();
+  bus && bus.emit('atc:done', { id });
 }
 
 async function pump() {
@@ -85,7 +104,7 @@ async function pump() {
   busy = false;
 }
 
-/** Queue a radio line. Deviation calls drop if the channel is already busy. */
+/** Queue a radio line ({id, text, speech} or a live voice note {b64}). Deviation calls drop if the channel is busy. */
 export function say(atc, { droppable = false } = {}) {
   if (droppable && (busy || queue.length)) return;
   if (queue.length > 2) queue.splice(0, queue.length - 2); // keep the radio from lagging behind
@@ -93,7 +112,10 @@ export function say(atc, { droppable = false } = {}) {
   pump();
 }
 
-export function initRadio(bus) {
+export function initRadio(b) {
+  bus = b;
   const DROP = new Set(['high', 'low', 'fast', 'slow', 'centre']);
   bus.on('atc', a => say(a, { droppable: DROP.has(a.id) }));
+  bus.on('clips', ({ clips }) => refreshClips(clips));
+  refreshClips();
 }

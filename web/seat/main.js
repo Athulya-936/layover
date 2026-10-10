@@ -11,13 +11,33 @@ import { initHud } from './ui/hud.js';
 import { initNotify, toast } from './ui/notify.js';
 import { createCertificate } from './ui/certificate.js';
 import { createWhereNext } from './ui/wherenext.js';
+import { createBelow } from './ui/below.js';
+import { createReadback } from './ui/readback.js';
+import { createPicker } from './ui/picker.js';
 import { initRadio, unlockAudio } from './audio/radio.js';
+import { setAirports } from './audio/lines.js';
 
 const bus = createBus();
 window.valkyrie = { bus };   // handy in devtools
 
 const list = await fetch('../data/airports.json').then(r => r.json());
 const airports = Object.fromEntries(list.map(a => [a.iata, a]));
+setAirports(airports);
+const cityOf = iata => (airports[iata]?.city || iata).split('/')[0].trim();
+
+// Tile cache (sw.js): fly the demo route a few times and it survives a dead hotspot.
+let cachedTiles = null;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(e => console.warn('[seat] no tile cache:', e.message));
+  navigator.serviceWorker.addEventListener('message', e => { if (e.data && 'cached' in e.data) cachedTiles = e.data.cached; });
+  setInterval(() => navigator.serviceWorker.controller?.postMessage('count'), 5000);
+}
+
+// Frame rate, reported to /admin so you can decide on photoreal tiles / perf knobs.
+let fps = 0;
+{ let frames = 0, t0 = performance.now();
+  const tick = () => { frames++; const now = performance.now(); if (now - t0 >= 1000) { fps = Math.round(frames * 1000 / (now - t0)); frames = 0; t0 = now; } requestAnimationFrame(tick); };
+  requestAnimationFrame(tick); }
 
 // Person A's sim if merged, else a stub that fakes enough events to drive the experience.
 async function loadSim() {
@@ -42,12 +62,30 @@ createInput(bus);
 bus.on('input', i => sim.setInput(i));
 
 const director = createDirector({ bus, sim, config: CONFIG });
-createNet(bus, { getPhase: () => director.phase });
+let photoreal = false;
+const net = createNet(bus, { getPhase: () => director.phase, getExtra: () => ({ fps, photoreal, cachedTiles, controlling: director.controlling }) });
+window.valkyrie.sim = sim;
 
 const whereNext = createWhereNext({ config: CONFIG, getRoute: () => director.route });
 createShell({ bus, config: CONFIG, airports, actions: director.actions, openWhereNext: () => whereNext.open() });
 const cert = createCertificate({ bus, config: CONFIG, airports, onFlyAgain: () => director.actions.flyAgain(), onWhereNext: () => whereNext.open() });
-const intro = createIntro({ airports, onStart: unlockAudio, onDone: () => director.actions.introDone() });
+const picker = createPicker({ bus, airports, send: net.send, getRoute: () => director.route });
+const intro = createIntro({ airports, onStart: unlockAudio, onDone: () => director.actions.introDone(), onPick: () => picker.open() });
+createBelow({ bus, airports });
+createReadback({ bus, config: CONFIG, getRoute: () => director.route, send: net.send });
+
+// Admin feature toggles (photorealistic 3D tiles).
+bus.on('feature', async f => {
+  if (typeof f.photoreal !== 'boolean' || f.photoreal === photoreal || !sim.setPhotoreal) return;
+  const on = await sim.setPhotoreal(f.photoreal);
+  photoreal = !!on;
+  if (f.photoreal && !on) toast('Photorealistic 3D tiles are not available on this Cesium ion account.', { title: '3D tiles', ttl: 6000 });
+});
+// Live tower: typed messages are spoken, voice notes play through the radio chain (both subtitled).
+bus.on('tower', m => {
+  if (m.kind === 'text' && m.text) bus.emit('atc', { id: 'tower-text', text: m.text, speech: m.text });
+  if (m.kind === 'voice' && m.b64) bus.emit('atc', { id: 'tower-voice', text: '🎙️ Live from the tower', b64: m.b64 });
+});
 
 addEventListener('pointerdown', unlockAudio, { once: true });
 bus.on('intro:skip', () => intro.skip());
@@ -59,7 +97,7 @@ bus.on('phase', ({ phase, route }) => {
   if (phase === PHASE.CERTIFICATE) cert.show({ route, save: director.save });
   if (phase !== PHASE.CRUISE && phase !== PHASE.CERTIFICATE) whereNext.close();
   if (phase === PHASE.DESCENT_CALL) {
-    closeDescent = toast('Dubai Approach is calling! Want to fly the landing?', {
+    closeDescent = toast(`${cityOf(route.to)} Approach is calling! Want to fly the landing?`, {
       title: '📻 Incoming call', ttl: 0, kind: 'call',
       actions: [{ label: 'Take the approach', primary: true, fn: () => director.actions.takeApproach() }],
     });

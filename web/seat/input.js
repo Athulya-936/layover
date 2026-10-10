@@ -1,5 +1,6 @@
 // Keyboard + on-screen touch fallback → bus 'input'. The yoke wins whenever it is sending.
-// Keys (same as A's sandbox): W/S pitch, A/D roll, Shift/Ctrl throttle, B brake, K kid toggle.
+// Keys (same as A's sandbox): W/S pitch (S = pull back = nose up), A/D roll, Shift/Ctrl throttle,
+// B brake, K kid toggle, V cockpit/chase camera, T take the controls / back to autopilot (cruise).
 export function createInput(bus) {
   const keys = new Set();
   let throttle = 0;
@@ -15,7 +16,10 @@ export function createInput(bus) {
   addEventListener('keydown', e => {
     if (e.target.closest && e.target.closest('input,select,textarea')) return;
     const k = e.key.toLowerCase();
-    if (k === 'k' && !e.repeat) bus.emit('button', { id: 'kid', src: 'keys' });
+    if (!e.repeat) {
+      const id = { k: 'kid', v: 'camera', t: 'control' }[k];
+      if (id) bus.emit('button', { id, src: 'keys' });
+    }
     keys.add(e.code);
     lastLocal = performance.now();
   });
@@ -30,9 +34,9 @@ export function createInput(bus) {
     if (keys.size) lastLocal = now;
     if (now - lastYoke < 500) return;          // yoke is live; stay quiet
     if (now - lastLocal > 1500) return;        // nothing local happening
-    const kp = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
+    const kp = (keys.has('KeyS') ? 1 : 0) - (keys.has('KeyW') ? 1 : 0);
     const kr = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
-    // Arrow keys mirror W/S/A/D (Up = nose down, like a real yoke push).
+    // Arrow keys mirror W/S/A/D (Up = push = nose down, like a real yoke).
     const ap = (keys.has('ArrowDown') ? 1 : 0) - (keys.has('ArrowUp') ? 1 : 0);
     const ar = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
     const pitch = clamp(kp + ap + touch.pitch), roll = clamp(kr + ar + touch.roll);

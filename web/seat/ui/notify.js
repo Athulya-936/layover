@@ -39,6 +39,7 @@ export function vee(text, ms = 4500) {
 export function initNotify(bus) {
   let kid = true;
   bus.on('kid', ({ on }) => { kid = on; toast(on ? 'Kid Mode ON: the plane helps you fly' : 'Pilot Mode: no assists', { ttl: 2500 }); });
+  bus.on('mission', ({ text, done }) => { if (kid) vee(text, 5000); else toast(text, { title: done ? '✅ Mission' : '🎯 Mission', ttl: 5000 }); });
   bus.on('badge', ({ name }) => toast(name, { title: '🏅 Badge earned', ttl: 3500, kind: 'badge' }));
   bus.on('flight:ring', ({ index, total }) => { if (kid) vee(index + 1 >= total ? 'All rings! Now gently down to the runway…' : `Ring ${index + 1} of ${total}! Keep going!`, 2000); });
   bus.on('flight:touchdown', td => { if (td.grade === 'GO_AROUND') toast('Go around! Let\'s set you up for another try…', { title: 'Missed it', ttl: 3000 }); });

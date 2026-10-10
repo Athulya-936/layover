@@ -2,20 +2,58 @@
 import { MSG } from '../shared/contracts.js';
 
 const $ = id => document.getElementById(id);
-const ROLL_FULL_DEG = 35, PITCH_FULL_DEG = 30, DEADZONE = 0.05;
+// Degrees of tilt for full deflection, per grip. Landscape = steering wheel, portrait = tray.
+const GRIP = { landscape: { roll: 35, pitch: 30 }, portrait: { roll: 30, pitch: 25 } };
+const DEADZONE = 0.05;
 
 let ws = null, connected = false;
+// Transport: WebSocket first. iPhone Safari often blocks wss:// to a self-signed cert even after the
+// page warning was accepted, so if the socket never opens we POST to /api/yoke over the same HTTPS.
+let mode = 'ws', everOpened = false, inflight = false, pendingInput = null;
 let raw = { beta: 0, gamma: 0 }, neutral = null, gotSensor = false;
 let throttle = 0, brake = false, kid = true;
 let invertPitch = false;
 try { invertPitch = localStorage.getItem('valkyrie:invertPitch') === '1'; } catch { /* ignore */ }
 
-function send(msg) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+function send(msg) {
+  if (mode === 'ws') { if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg)); return; }
+  // HTTP: inputs are "latest wins" (never queue behind a slow request); buttons always go.
+  if (msg.t === MSG.INPUT && inflight) { pendingInput = msg; return; }
+  post(msg);
+}
+
+async function post(msg) {
+  if (msg.t === MSG.INPUT) inflight = true;
+  try {
+    const r = await fetch('/api/yoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) });
+    const { haptic } = await r.json();
+    connected = true;
+    if (haptic) buzz(haptic);
+  } catch { connected = false; }
+  if (msg.t === MSG.INPUT) {
+    inflight = false;
+    if (pendingInput) { const next = pendingInput; pendingInput = null; post(next); }
+  }
+}
+
+function useHttp() {
+  if (mode === 'http') return;
+  mode = 'http';
+  try { ws && ws.close(); } catch { /* ignore */ }
+  render();
+}
 
 function connect() {
+  if (mode === 'http') return;
   ws = new WebSocket(`wss://${location.host}/ws?role=yoke`);
-  ws.onopen = () => { connected = true; render(); };
-  ws.onclose = () => { connected = false; render(); setTimeout(connect, 1000); };
+  const guard = setTimeout(() => { if (!everOpened) useHttp(); }, 3000);
+  ws.onopen = () => { everOpened = true; clearTimeout(guard); connected = true; render(); };
+  ws.onclose = () => {
+    clearTimeout(guard);
+    if (mode === 'http') return;
+    connected = false; render();
+    if (!everOpened) useHttp(); else setTimeout(connect, 1000);
+  };
   ws.onerror = () => ws.close();
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -29,9 +67,11 @@ function buzz(ms) {
   requestAnimationFrame(() => { f.style.transition = 'opacity .5s'; f.style.opacity = 0; });
 }
 
+function screenAngle() { return (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0; }
+const isPortrait = () => { const a = ((screenAngle() % 360) + 360) % 360; return a === 0 || a === 180; };
 // Landscape: roll from beta, pitch from gamma. Signs flip with which way the phone is turned.
 function orientationSign() {
-  const a = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 90;
+  const a = screenAngle();
   return (a === -90 || a === 270) ? -1 : 1;
 }
 
@@ -45,11 +85,19 @@ function shape(x) {
 function axes() {
   if (!gotSensor) return { pitch: 0, roll: 0 };
   const n = neutral || { beta: 0, gamma: 0 };
-  const s = orientationSign();
   // Unwrap gamma's ±90 flip so holding the phone fairly upright doesn't jump.
   let dg = raw.gamma - n.gamma; if (dg > 90) dg -= 180; if (dg < -90) dg += 180;
-  const roll = shape(s * (raw.beta - n.beta) / ROLL_FULL_DEG);
-  let pitch = shape(s * -dg / PITCH_FULL_DEG);
+  let roll, pitch;
+  if (isPortrait()) {
+    // Tray grip: tilt left/right to turn, tip the top edge toward you (pull back) to climb.
+    const flip = screenAngle() === 180 ? -1 : 1;
+    roll = shape(flip * dg / GRIP.portrait.roll);
+    pitch = shape(-flip * (raw.beta - n.beta) / GRIP.portrait.pitch);
+  } else {
+    const s = orientationSign();
+    roll = shape(s * (raw.beta - n.beta) / GRIP.landscape.roll);
+    pitch = shape(s * -dg / GRIP.landscape.pitch);
+  }
   if (invertPitch) pitch = -pitch;
   return { pitch, roll };
 }
@@ -62,7 +110,7 @@ function render() {
   $('kid').classList.toggle('on', kid);
   $('kid').textContent = kid ? 'KID ✓' : 'KID';
   $('brake').classList.toggle('on', brake);
-  $('status').innerHTML = (connected ? '<b>● connected</b>' : '○ connecting…') +
+  $('status').innerHTML = (connected ? `<b>● connected${mode === 'http' ? ' (https)' : ''}</b>` : '○ connecting…') +
     (gotSensor ? '' : ' · no tilt sensor yet') + ` · pitch ${invertPitch ? 'inverted' : 'normal'} (double-tap horizon)`;
 }
 
@@ -92,6 +140,12 @@ function bindButtons() {
   $('reset').addEventListener('click', () => { send({ t: MSG.BUTTON, id: 'reset' }); buzz(40); });
   $('kid').addEventListener('click', () => { kid = !kid; send({ t: MSG.BUTTON, id: 'kid' }); buzz(40); });
   $('centre').addEventListener('click', () => { neutral = { ...raw }; buzz(40); });
+  $('cam').addEventListener('click', () => { send({ t: MSG.BUTTON, id: 'camera' }); buzz(40); });
+  $('fly').addEventListener('click', () => { send({ t: MSG.BUTTON, id: 'control' }); buzz(40); });
+  // Switching grip changes which axis means what: re-centre on the new hold.
+  const recentre = () => setTimeout(() => { if (gotSensor) neutral = { ...raw }; }, 400);
+  screen.orientation?.addEventListener?.('change', recentre);
+  addEventListener('orientationchange', recentre);
   let lastTap = 0;
   $('horizon').addEventListener('pointerdown', () => {
     const now = Date.now();
@@ -110,7 +164,6 @@ async function start() {
   } catch (e) { $('err').textContent = 'Motion permission error: ' + e.message; return; }
   addEventListener('deviceorientation', onOrient);
   try { await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); } catch { /* iOS */ }
-  try { await screen.orientation?.lock?.('landscape'); } catch { /* not supported */ }
   $('start').style.display = 'none';
   setTimeout(() => { if (!gotSensor) $('status').textContent = 'No tilt data. Use https:// and allow motion access.'; }, 2000);
 }

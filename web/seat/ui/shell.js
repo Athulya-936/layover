@@ -59,7 +59,11 @@ export function createShell({ bus, config, airports, actions, openWhereNext }) {
 
   // Yoke QR: use the LAN IP even if the seat was opened on localhost.
   fetch('/api/info').then(r => r.json()).then(({ ips, port }) => {
-    const host = /^(localhost|127\.)/.test(location.hostname) && ips[0] ? `${ips[0]}:${port}` : location.host;
+    // Keep the address the seat was opened on if phones can reach it; otherwise (localhost, an
+    // unreachable 192.0.0.x CLAT address) use the server's first reachable IP. IPv6 needs [brackets].
+    const here = location.hostname.replace(/^\[|\]$/g, '');
+    const fmt = ip => (ip.includes(':') ? `[${ip}]` : ip);
+    const host = ips.includes(here) || !ips[0] ? location.host : `${fmt(ips[0])}:${port}`;
     renderQR(home.querySelector('.yoke-qr .qr'), `https://${host}/yoke/`, 140);
     home.querySelector('.yoke-qr small').textContent = `Scan, or open https://${host}/yoke/`;
   }).catch(() => {});
@@ -83,7 +87,9 @@ export function createShell({ bus, config, airports, actions, openWhereNext }) {
   function drawTicks(c) {
     const ticks = [['Gate', c.depMs - 10 * MIN], ['Takeoff', c.depMs], ['Cruise', c.depMs + 0.15 * (c.arrMs - c.depMs)],
       ['TOD', c.arrMs - config.TOD_MIN_BEFORE_ARR * MIN], ['Land', c.arrMs]];
-    top.querySelector('.ticks').innerHTML = ticks.map(([l, ms]) => `<span style="left:${pos(c, ms) * 100}%">${l}</span>`).join('');
+    // Long flights squeeze Gate against Takeoff: drop a label that would overlap the next one.
+    const shown = ticks.filter(([, ms], i) => i === ticks.length - 1 || pos(c, ticks[i + 1][1]) - pos(c, ms) >= 0.06);
+    top.querySelector('.ticks').innerHTML = shown.map(([l, ms]) => `<span style="left:${pos(c, ms) * 100}%">${l}</span>`).join('');
   }
 
   bus.on('clock', c => {
@@ -93,7 +99,7 @@ export function createShell({ bus, config, airports, actions, openWhereNext }) {
     const p = pos(c, c.nowMs) * 100;
     top.querySelector('.done').style.width = `${p}%`;
     top.querySelector('.marker').style.left = `${p}%`;
-    top.querySelector('.remain').textContent = c.nowMs < c.depMs ? `Departs in ${fmtDur(c.depMs - c.nowMs)}` : c.nowMs < c.arrMs ? `${fmtDur(c.arrMs - c.nowMs)} to Dubai` : 'Arrived';
+    top.querySelector('.remain').textContent = c.nowMs < c.depMs ? `Departs in ${fmtDur(c.depMs - c.nowMs)}` : c.nowMs < c.arrMs ? `${fmtDur(c.arrMs - c.nowMs)} to ${airports[route.to]?.city?.split('/')[0] || route.to}` : 'Arrived';
     top.querySelector('.eta').textContent = `ETA ${fmtTime(c.arrMs)}${c.warp !== 1 ? ` · ⏩ ${c.warp}×` : ''}`;
     updateGate();
   });
