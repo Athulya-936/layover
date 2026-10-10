@@ -1,0 +1,16 @@
+{
+  "name": "valkyrie",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Seatback Fly Your Flight + The Visa Guy Where next? (Layover 2026)",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "selfsigned": "^2.4.1",
+    "ws": "^8.17.1"
+  }
+}
