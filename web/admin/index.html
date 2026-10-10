@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valkyrie Admin</title>
+<style>
+  :root { --bg:#0a1224; --panel:#121d38; --line:#2a3b66; --ink:#eef3ff; --dim:#93a3c8; --amber:#ffb547; --go:#3ddc97; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:500 15px/1.4 system-ui, sans-serif; padding:16px; }
+  h1 { margin:0 0 12px; font-size:18px; letter-spacing:.2em; color:var(--amber); }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; }
+  h2 { margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.15em; color:var(--dim); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; }
+  button, select { font:700 15px system-ui; padding:12px 14px; border-radius:10px; border:1px solid var(--line); background:#1a2a52; color:var(--ink); }
+  button.on { background:var(--amber); color:#1a1200; }
+  button.reset { background:#5a1c26; }
+  pre { margin:0; white-space:pre-wrap; font:13px/1.5 ui-monospace, monospace; color:var(--dim); }
+  #conn { float:right; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>VALKYRIE ADMIN <span id="conn">○</span></h1>
+<section><h2>Route</h2><div class="row"><select id="route"></select></div></section>
+<section><h2>Time warp</h2><div class="row" id="warp"></div></section>
+<section><h2>Jump to phase</h2><div class="row" id="jump"></div></section>
+<section><h2>Reset</h2><div class="row"><button class="reset" id="reset">Reset flight → Intro</button></div></section>
+<section><h2>Live status</h2><pre id="status">waiting for seat…</pre></section>
+<script type="module">
+import { CONFIG } from '../shared/config.js';
+import { PHASE, MSG, UNITS } from '../shared/contracts.js';
+const $ = id => document.getElementById(id);
+let ws, clock = null, seat = null, presence = {};
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+const admin = p => send({ t: MSG.ADMIN, ...p });
+
+for (const r of CONFIG.ROUTES) $('route').add(new Option(`${r.flightNo} · ${r.from} → ${r.to}`, r.id));
+$('route').onchange = e => admin({ cmd: 'route', routeId: e.target.value });
+for (const w of [1, 60, 600]) {
+  const b = document.createElement('button'); b.textContent = `${w}×`; b.dataset.w = w;
+  b.onclick = () => admin({ cmd: 'warp', value: w }); $('warp').appendChild(b);
+}
+for (const p of Object.values(PHASE)) {
+  const b = document.createElement('button'); b.textContent = p.replace('_', ' ');
+  b.onclick = () => admin({ cmd: 'jump', phase: p }); $('jump').appendChild(b);
+}
+$('reset').onclick = () => { if (confirm('Reset the flight to the intro?')) admin({ cmd: 'reset' }); };
+
+function connect() {
+  ws = new WebSocket(`wss://${location.host}/ws?role=admin`);
+  ws.onopen = () => { $('conn').textContent = '● connected'; $('conn').style.color = 'var(--go)'; };
+  ws.onclose = () => { $('conn').textContent = '○ reconnecting'; $('conn').style.color = ''; setTimeout(connect, 1000); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === MSG.CLOCK) clock = m;
+    else if (m.t === MSG.STATUS) seat = m;
+    else if (m.t === 'presence') presence = m;
+    render();
+  };
+}
+function render() {
+  if (clock) {
+    $('route').value = clock.routeId;
+    for (const b of $('warp').children) b.classList.toggle('on', +b.dataset.w === clock.warp);
+  }
+  const s = seat && seat.state;
+  const lines = [
+    `devices  seat ${presence.seat ?? '?'} · yoke ${presence.yoke ?? '?'} · admin ${presence.admin ?? '?'}`,
+    clock ? `clock    ${(clock.progress * 100).toFixed(1)}% · now ${new Date(clock.nowMs).toLocaleTimeString()} · arr ${new Date(clock.arrMs).toLocaleTimeString()} · ${clock.warp}×` : 'clock    —',
+    `phase    ${seat ? seat.phase : '—'}`,
+    s ? `flight   ${Math.round(s.speedMs * UNITS.KT)} kt · ${Math.round(s.aglM * UNITS.FT)} ft AGL · ${Math.round(s.vsMs * UNITS.FPM)} fpm · hdg ${Math.round(s.headingDeg)} · thr ${Math.round(s.throttle * 100)}% · ${s.onGround ? 'ground' : 'air'} · ${s.mode}` : 'flight   —',
+  ];
+  $('status').textContent = lines.join('\n');
+}
+connect();
+</script>
+</body>
+</html>

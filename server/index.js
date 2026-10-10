@@ -47,6 +47,7 @@ function loadConfig() {
 const CONFIG = loadConfig();
 const app = express();
 app.get('/', (_req, res) => res.redirect('/seat/'));
+app.get('/api/info', (_req, res) => res.json({ ips: lanIps(), port: PORT }));
 app.use(express.static(path.join(ROOT, 'web'), { extensions: ['html'] }));
 
 const server = https.createServer(loadCert(), app);
