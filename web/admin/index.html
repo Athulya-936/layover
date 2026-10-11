@@ -92,7 +92,8 @@ function render() {
     `devices  seat ${presence.seat ?? '?'} · yoke ${presence.yoke ?? '?'} · admin ${presence.admin ?? '?'}`,
     clock ? `clock    ${(clock.progress * 100).toFixed(1)}% · now ${new Date(clock.nowMs).toLocaleTimeString()} · arr ${new Date(clock.arrMs).toLocaleTimeString()} · ${clock.warp}×` : 'clock    —',
     `phase    ${seat ? seat.phase : '—'}${seat?.controlling ? ' · passenger hand-flying' : ''}`,
-    `seat     ${seat?.fps ?? '—'} fps${seat?.fps && seat.fps < 30 ? '  ⚠ low: turn photoreal off / see README perf knobs' : ''} · photoreal ${seat?.photoreal ? 'ON' : 'off'} · ${seat?.cachedTiles ?? '?'} tiles cached`,
+    `seat     ${seat?.fps ?? '—'} fps${seat?.fps && seat.fps < 30 ? '  ⚠ low graphics speed' : ''} · quality ${seat?.quality ?? '—'} (0 best, 4 lowest; auto) · photoreal ${seat?.photoreal ? 'ON' : 'off'} · ${seat?.cachedTiles ?? '?'} tiles cached`,
+    `yoke     ${seat?.yokeHz ?? '—'} inputs/s${seat && presence.yoke && seat.yokeHz < 20 ? '  ⚠ choppy phone link (hotspot): move closer / use the iPhone as hotspot' : ''}`,
     s ? `flight   ${Math.round(s.speedMs * UNITS.KT)} kt · ${Math.round(s.aglM * UNITS.FT)} ft AGL · ${Math.round(s.vsMs * UNITS.FPM)} fpm · hdg ${Math.round(s.headingDeg)} · thr ${Math.round(s.throttle * 100)}% · ${s.onGround ? 'ground' : 'air'} · ${s.mode}` : 'flight   —',
   ];
   $('status').textContent = lines.join('\n');

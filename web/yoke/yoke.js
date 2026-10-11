@@ -114,10 +114,15 @@ function render() {
     (gotSensor ? '' : ' · no tilt sensor yet') + ` · pitch ${invertPitch ? 'inverted' : 'normal'} (double-tap horizon)`;
 }
 
+// Light low-pass on the sensor: takes out hand tremor without adding noticeable delay (~30 ms).
+const SENSOR_SMOOTH = 0.4;
 function onOrient(e) {
   if (e.beta == null) return;
-  raw = { beta: e.beta, gamma: e.gamma };
-  if (!gotSensor) { gotSensor = true; neutral = { ...raw }; }
+  if (!gotSensor) { raw = { beta: e.beta, gamma: e.gamma }; gotSensor = true; neutral = { ...raw }; return; }
+  raw.beta += (e.beta - raw.beta) * SENSOR_SMOOTH;
+  // gamma flips ±90 when the phone passes upright: jump with it instead of smoothing across the flip
+  if (Math.abs(e.gamma - raw.gamma) > 90) raw.gamma = e.gamma;
+  else raw.gamma += (e.gamma - raw.gamma) * SENSOR_SMOOTH;
 }
 
 // Throttle: drag anywhere on the bar.
@@ -178,3 +183,4 @@ setInterval(() => {
 }, 1000 / 30);
 setInterval(render, 1000 / 20);
 render();
+window.__yokeReady = true;

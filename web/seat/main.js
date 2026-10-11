@@ -63,7 +63,10 @@ bus.on('input', i => sim.setInput(i));
 
 const director = createDirector({ bus, sim, config: CONFIG });
 let photoreal = false;
-const net = createNet(bus, { getPhase: () => director.phase, getExtra: () => ({ fps, photoreal, cachedTiles, controlling: director.controlling }) });
+// Yoke input rate as the seat receives it (≈30/s is healthy; low or bursty = Wi-Fi / hotspot problem).
+let yokeHz = 0;
+{ let n = 0; bus.on('input', i => { if (i.src === 'yoke') n++; }); setInterval(() => { yokeHz = n; n = 0; }, 1000); }
+const net = createNet(bus, { getPhase: () => director.phase, getExtra: () => ({ fps, photoreal, cachedTiles, yokeHz, quality: sim.getPerf?.()?.level ?? null, controlling: director.controlling }) });
 window.valkyrie.sim = sim;
 
 const whereNext = createWhereNext({ config: CONFIG, getRoute: () => director.route });

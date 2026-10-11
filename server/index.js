@@ -83,6 +83,14 @@ function listClips() {
 }
 
 const app = express();
+// Log each page a device opens (with its address), so "did the phone even reach the laptop?" is obvious.
+app.use((req, _res, next) => {
+  if (req.method === 'GET' && /\/(seat|yoke|admin|tower)\/?$/.test(req.path)) {
+    const from = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    console.log(`[http] ${from} opened ${req.path}`);
+  }
+  next();
+});
 app.get('/', (_req, res) => res.redirect('/seat/'));
 app.get('/api/info', (_req, res) => res.json({ ips: lanIps(), port: PORT }));
 
@@ -120,7 +128,8 @@ app.post('/api/yoke', express.json({ limit: '4kb' }), (req, res) => {
   res.json({ haptic: httpYoke.haptic });
   httpYoke.haptic = 0;
 });
-app.use(express.static(path.join(ROOT, 'web'), { extensions: ['html'] }));
+// no-cache = always revalidate (cheap 304s on the LAN). Stops phones running a stale yoke.js after an update.
+app.use(express.static(path.join(ROOT, 'web'), { extensions: ['html'], setHeaders: res => res.setHeader('Cache-Control', 'no-cache') }));
 
 const server = https.createServer(loadCert(), app);
 const wss = new WebSocketServer({ server, path: '/ws' });

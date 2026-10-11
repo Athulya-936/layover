@@ -67,6 +67,13 @@
   </div>
 </div>
 <div id="flash"></div>
+<script>
+  // Show problems on the phone itself (there's no console on an iPhone).
+  const showErr = msg => { const e = document.getElementById('err'); if (e) e.textContent = '⚠ ' + msg; };
+  addEventListener('error', e => showErr((e.message || 'script failed to load') + (e.filename ? ' (' + e.filename.split('/').pop() + ':' + e.lineno + ')' : '')), true);
+  addEventListener('unhandledrejection', e => showErr(String(e.reason && e.reason.message || e.reason)));
+  setTimeout(() => { if (!window.__yokeReady) showErr('The yoke script did not start. Reload the page; if this stays, send a screenshot.'); }, 4000);
+</script>
 <script type="module" src="./yoke.js"></script>
 </body>
 </html>

@@ -18,6 +18,7 @@ const MODEL_Z_OFFSET = 1.5;          // lift the model so the wheels sit on the 
 const CRUISE_SPEED = 240;            // m/s shown on the HUD during autopilot cruise (~470 kt)
 const RING_HIT = { kid: 40, pilot: 30 };
 const MANUAL_THROTTLE_DELTA = 0.15;  // Pilot Mode approach: autothrottle until the lever moves this much
+const INPUT_SMOOTH_S = 0.08;         // ease stick input over ~80 ms: hides Wi-Fi jitter, still feels instant
 
 export async function createSim({ bus, containerId, config, airports }) {
   const Cesium = window.Cesium;
@@ -30,7 +31,9 @@ export async function createSim({ bus, containerId, config, airports }) {
   let phase = 'takeoff';             // assist context: 'takeoff' | 'approach' | 'cruise'
   let s = createState();
   let origin = null, rwy = null, rwyHdg = 0, slope = 0, groundZ = 0;
-  let input = { pitch: 0, roll: 0, throttle: 0, brake: false, src: 'keys' };
+  let input = { pitch: 0, roll: 0, throttle: 0, brake: false, src: 'keys' };   // smoothed, what physics uses
+  let target = { ...input };                                                   // latest raw input from yoke/keys
+  const prev = { x: 0, y: 0, z: 0, heading: 0, pitch: 0, roll: 0 };            // state one physics step ago
   let kid = false, paused = false, controlling = false;
   let flags = {}, lastDev = 0, lastSpawn = null, landed = false, spawnSeq = 0;
   let thrRef = null, manualThr = false;
@@ -53,6 +56,10 @@ export async function createSim({ bus, containerId, config, airports }) {
 
   // ---------- physics (fixed step) ----------
   function physics(dt) {
+    const k = 1 - Math.exp(-dt / INPUT_SMOOTH_S);
+    input.pitch += (target.pitch - input.pitch) * k;
+    input.roll += (target.roll - input.roll) * k;
+    input.throttle = target.throttle; input.brake = target.brake; input.src = target.src;
     const rc = alongCross(s.x, s.y, rwyHdg);
     const { input: inp, opts } = assist(s, input, { kid, phase, rwyHdg, ...rc });
     if (!kid && phase === 'approach' && !s.onGround && !manualThr) {
@@ -91,6 +98,9 @@ export async function createSim({ bus, containerId, config, airports }) {
     view = { hdgDeg: s.heading / D, pitch: s.pitch, roll: s.roll, speed: s.speed, vs: s.vs, agl: s.z - gz, rwy: r };
   }
 
+  const hpr = new Cesium.HeadingPitchRoll();
+  function snap() { prev.x = s.x; prev.y = s.y; prev.z = s.z; prev.heading = s.heading; prev.pitch = s.pitch; prev.roll = s.roll; }
+
   // ---------- per-frame ----------
   viewer.scene.preUpdate.addEventListener(() => {
     const now = performance.now();
@@ -100,8 +110,14 @@ export async function createSim({ bus, containerId, config, airports }) {
 
     if (!paused && (mode === 'free' || (mode === 'cruise' && controlling))) {
       acc += dt;
-      while (acc >= PHYS_DT) { physics(PHYS_DT); acc -= PHYS_DT; }
-      localToWorld(origin, s.x, s.y, s.z + MODEL_Z_OFFSET, worldPos);
+      while (acc >= PHYS_DT) { snap(); physics(PHYS_DT); acc -= PHYS_DT; }
+      // Draw between the last two physics steps so motion is smooth at any frame rate.
+      const a = acc / PHYS_DT, lerp = (p, c) => p + (c - p) * a;
+      const angle = (p, c) => p + Math.atan2(Math.sin(c - p), Math.cos(c - p)) * a;
+      localToWorld(origin, lerp(prev.x, s.x), lerp(prev.y, s.y), lerp(prev.z, s.z) + MODEL_Z_OFFSET, worldPos);
+      view.hdgDeg = angle(prev.heading, s.heading) / D;
+      view.pitch = lerp(prev.pitch, s.pitch);
+      view.roll = lerp(prev.roll, s.roll);
     }
     if (mode === 'cruise') {
       const p = cruise.update(paused ? 0 : dt);
@@ -115,8 +131,8 @@ export async function createSim({ bus, containerId, config, airports }) {
       }
     }
 
-    const hpr = new Cesium.HeadingPitchRoll(view.hdgDeg * D + MODEL_HEADING_OFFSET, view.pitch, view.roll);
-    orient = Cesium.Transforms.headingPitchRollQuaternion(worldPos, hpr);
+    hpr.heading = view.hdgDeg * D + MODEL_HEADING_OFFSET; hpr.pitch = view.pitch; hpr.roll = view.roll;
+    orient = Cesium.Transforms.headingPitchRollQuaternion(worldPos, hpr, undefined, undefined, orient);
     plane.show = cam.kind !== 'cockpit';
     cam.update(worldPos, view.hdgDeg, view.pitch, view.roll, dt, mode === 'cruise' && !controlling);
 
@@ -155,6 +171,7 @@ export async function createSim({ bus, containerId, config, airports }) {
       phase = 'takeoff'; mode = 'free'; controlling = false; flags = {}; landed = false; acc = 0;
       rings.clear(); cruise.showLine(false);
       if (cam.kind === 'orbit') cam.set('chase');
+      snap();
       localToWorld(origin, 0, 0, MODEL_Z_OFFSET, worldPos);
       plane.show = true;
     },
@@ -183,6 +200,7 @@ export async function createSim({ bus, containerId, config, airports }) {
         groundZ = -CRUISE_ALT + 500;              // the ground is far below
         s = createState({ heading: view.hdgDeg * D, speed: 150, throttle: 0.6, onGround: false });
         rwyHdg = s.heading; rwy = null;
+        snap();
         controlling = true;
       } else if (!on && controlling) {
         blendFrom = Cesium.Cartesian3.clone(worldPos);
@@ -200,6 +218,7 @@ export async function createSim({ bus, containerId, config, airports }) {
         x: -distM * Math.sin(rwyHdg), y: -distM * Math.cos(rwyHdg), z: distM * Math.tan(GLIDE),
         heading: rwyHdg, speed: 75, pitch: -GLIDE, throttle: 0.11, onGround: false,
       });
+      snap();
       phase = 'approach'; mode = 'free'; controlling = false; landed = false; acc = 0; lastDev = performance.now();
       thrRef = null; manualThr = false;
       lastSpawn = { iata, rwyId, distM };
@@ -210,13 +229,16 @@ export async function createSim({ bus, containerId, config, airports }) {
     },
 
     setKidMode(on) { kid = !!on; },
-    setInput(i) { input = { ...input, ...i }; },
+    setInput(i) { target = { ...target, ...i }; },
     setCamera(kind) { cam.set(kind); },
     pause(on) { paused = !!on; },
     /** Optional (not in §5.4): Google Photorealistic 3D Tiles. Resolves to whether it is now on. */
     setPhotoreal(on) { return viewer.setPhotoreal(on); },
 
     /** @returns {import('../../shared/contracts.js').FlightState} */
+    /** Optional: current frame rate and auto-perf quality level (for /admin). */
+    getPerf() { return viewer.perf ? { fps: viewer.perf.fps, level: viewer.perf.level } : null; },
+
     getState() {
       const p = toLatLonH(worldPos);
       return {
