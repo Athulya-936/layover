@@ -5,9 +5,12 @@
   "description": "Seatback Fly Your Flight + The Visa Guy Where next? (Layover 2026)",
   "type": "commonjs",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node --test test/"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^4.19.2",
     "selfsigned": "^2.4.1",

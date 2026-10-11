@@ -31,6 +31,14 @@ export const MSG = Object.freeze({
   ADMIN: 'admin',   // admin → server {cmd:'warp', value} | {cmd:'jump', phase} | {cmd:'route', routeId} | {cmd:'reset'}
   HAPTIC: 'haptic', // seat  → yoke   {ms}                                        touchdown buzz
   STATUS: 'status', // seat  → admin  {phase, state:FlightState}                  2 Hz
+  // v2 additions (additive only; v1 messages unchanged)
+  FEATURE: 'feature',     // server→ seat  {photoreal:boolean}                    admin {cmd:'feature', photoreal}
+  TOWER: 'tower',         // tower → seat  {kind:'line', id} | {kind:'text', text} | {kind:'voice', mime, b64}
+  READBACK: 'readback',   // seat  → tower {id, heard, ok}                         passenger's spoken read-back
+  CLIPS: 'clips',         // server→ seat  {clips:{id:file}}                       after a clip is recorded on /tower
+  ROUTE_RESULT: 'routeResult', // server→ sender {route} | {error}                 admin/seat {cmd:'customRoute', from, to}
 });
+// BUTTON ids (v2): 'kid' | 'ready' | 'reset' | 'control' (take the controls in cruise) | 'camera' (cockpit/chase)
+// Clock (v2) also carries `route`: the full route object, so custom routes work without a config change.
 
 export const UNITS = { KT: 1.94384, FT: 3.28084, FPM: 196.85 };

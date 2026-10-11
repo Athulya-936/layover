@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>✈</text></svg>">
+<title>Valkyrie · Fly Your Flight</title>
+<link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Widgets/widgets.css">
+<link rel="stylesheet" href="./styles.css">
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Cesium.js"></script>
+<script src="../vendor/qrcode.min.js"></script><!-- qrcodejs 1.0.0 (MIT), vendored so the TVG QR never depends on the internet -->
+</head>
+<body>
+<div id="cesium"></div>
+<div id="loading"><div class="spin">✈</div><div>Preparing your flight…</div></div>
+<div id="offline-pill">⚠ Reconnecting to aircraft…</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
