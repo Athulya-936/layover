@@ -217,7 +217,7 @@ sequenceDiagram
 ### 6.1 Server (`server/`)
 | File | Responsibility |
 |---|---|
-| `index.js` | HTTPS + Express static hosting, WebSocket relay by role (`seat`, `yoke`, `admin`, `tower`), clip upload API, HTTPS-POST yoke fallback, page-open logging, prints the device URLs |
+| `index.js` | HTTPS (or plain HTTP behind a cloud host's HTTPS in cloud mode) + Express static hosting, WebSocket relay by role (`seat`, `yoke`, `admin`, `tower`), clip upload API, HTTPS-POST yoke fallback, page-open logging, prints the device URLs |
 | `clock.js` | Mock aircraft data feed: departure/arrival times, warp (virtual `now += realDt × warp`), jump-to-phase, route switching |
 | `routes.js` | Any-route builder: bearings, distances, runway choice, block time |
 
@@ -310,6 +310,7 @@ layover/
 │   └── tower/              live control tower
 ├── test/                   flight · routes · readback tests (node:test)
 ├── docs/                   BUILD_SPEC.md · RUNBOOK.md · MASTER_CHECKLIST.md
+├── render.yaml             one-click cloud deploy (Render)
 └── package.json
 ```
 
@@ -334,6 +335,24 @@ npm start       # prints the links for every device
 **No phone?** Keyboard: W/S pitch (S = nose up) · A/D roll · Shift/Ctrl throttle · B brake · K Kid Mode · V camera · T take the controls. On-screen arrows appear after 10 s.
 
 **Network tip:** all devices must be on the **same hotspot**. An **iPhone Personal Hotspot** is the most reliable. Some routers isolate devices from each other, and the terminal prints `[http] <address> opened /yoke/` so you can see whether the phone actually reached the laptop.
+
+### Host it online (for mentors to try later)
+The same code runs on a cloud host. Cloud mode switches on automatically there:
+- the host provides HTTPS, so there are **no certificate warnings**;
+- each new visitor gets a fresh flight from the gate;
+- a **🛠 Demo controls** link opens `/admin` so a visitor can jump through the phases.
+
+**Deploy on Render (free):**
+1. render.com → sign in with GitHub → **New → Blueprint** → choose this repo. It reads `render.yaml`: build `npm install`, start `npm start`, env `CLOUD=1`.
+2. Wait for the deploy, then open `https://<your-app>.onrender.com/seat/`.
+3. On cesium.com/ion → Access Tokens, restrict the token's **allowed URLs** to your Render address (and `localhost`) so others can't reuse it.
+
+Notes:
+- The free plan sleeps when idle, so the first visit takes about 30 s.
+- All visitors share one flight clock.
+- Clips recorded online are lost on restart, so record them locally and commit them.
+
+**Trying it online without a phone:** open `/seat/` and fly with the keyboard (Shift = throttle, S = pull up, A/D = turn). Open **🛠 Demo controls** in another tab to jump to Cruise → Descent call → Approach.
 
 ---
 

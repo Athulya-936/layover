@@ -1,0 +1,12 @@
+# Render.com blueprint: New → Blueprint → pick this repo. Free plan, HTTPS provided by Render.
+services:
+  - type: web
+    name: valkyrie
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/info
+    envVars:
+      - key: CLOUD
+        value: "1"

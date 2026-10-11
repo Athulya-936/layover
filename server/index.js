@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const http = require('http');
 const crypto = require('crypto');
 const express = require('express');
 const selfsigned = require('selfsigned');
@@ -11,6 +12,9 @@ const { createClock } = require('./clock');
 const { buildRoute } = require('./routes');
 
 const PORT = Number(process.env.PORT) || 8443;
+// Cloud hosts (Render, Railway, Fly) terminate HTTPS themselves and hand us plain HTTP, so we must
+// not use our self-signed cert there. Locally nothing changes: HTTPS on :8443 as before.
+const CLOUD = !!(process.env.CLOUD || process.env.RENDER || process.env.RAILWAY_ENVIRONMENT || process.env.FLY_APP_NAME);
 const ROOT = path.join(__dirname, '..');
 const CERT_DIR = path.join(ROOT, 'certs');
 
@@ -92,7 +96,7 @@ app.use((req, _res, next) => {
   next();
 });
 app.get('/', (_req, res) => res.redirect('/seat/'));
-app.get('/api/info', (_req, res) => res.json({ ips: lanIps(), port: PORT }));
+app.get('/api/info', (_req, res) => res.json({ ips: CLOUD ? [] : lanIps(), port: PORT, cloud: CLOUD }));
 
 // Recorded tower clips (recorded in the browser on /tower/, played by the seat through the radio chain).
 app.get('/api/clips', (_req, res) => res.json({ ids: [...lineIds()], clips: listClips() }));
@@ -131,7 +135,7 @@ app.post('/api/yoke', express.json({ limit: '4kb' }), (req, res) => {
 // no-cache = always revalidate (cheap 304s on the LAN). Stops phones running a stale yoke.js after an update.
 app.use(express.static(path.join(ROOT, 'web'), { extensions: ['html'], setHeaders: res => res.setHeader('Cache-Control', 'no-cache') }));
 
-const server = https.createServer(loadCert(), app);
+const server = CLOUD ? http.createServer(app) : https.createServer(loadCert(), app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 const clients = { seat: new Set(), yoke: new Set(), admin: new Set(), tower: new Set() };
 const features = { photoreal: false };   // seat-side toggles from admin, replayed to new seats
@@ -182,6 +186,8 @@ function handleAdmin(m, ws) {
 wss.on('connection', (ws, req) => {
   const role = new URL(req.url, 'https://x').searchParams.get('role');
   if (!clients[role]) { ws.close(1008, 'role must be seat|yoke|admin|tower'); return; }
+  // Online, visitors come one at a time: the first seat to arrive gets a fresh flight from the gate.
+  if (CLOUD && role === 'seat' && clients.seat.size === 0) clock.reset();
   clients[role].add(ws);
   console.log(`[ws] +${role} (${clients[role].size})`);
   send(ws, { t: 'clock', ...clock.snapshot() });
@@ -213,7 +219,8 @@ wss.on('connection', (ws, req) => {
 });
 
 server.listen(PORT, '::', () => {   // '::' = IPv6 + IPv4 (dual stack)
-  console.log(`\n  VALKYRIE up on :${PORT}\n`);
+  console.log(`\n  VALKYRIE up on :${PORT}${CLOUD ? ' (cloud mode: plain HTTP behind the host\'s HTTPS)' : ''}\n`);
+  if (CLOUD) return;
   const ips = lanIps();
   if (!ips.length) console.log('  ⚠ No address other devices can reach. Join a phone hotspot (an iPhone hotspot is the most reliable).\n');
   else if (!ips.some(ip => !ip.includes(':'))) console.log('  ℹ This hotspot is IPv6-only: use the [....] links below on the phone.\n');

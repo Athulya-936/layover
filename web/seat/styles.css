@@ -232,3 +232,7 @@ button.primary:disabled { opacity: .5; }
 .rb-mic:disabled { background: var(--red); color: #fff; }
 .rb-say { font-size: 15px; }
 .rb-heard { color: var(--dim); font-size: 13px; font-style: italic; }
+
+/* Hosted-online helper for visitors (mentors): opens /admin */
+.demo-link { position: fixed; right: 14px; top: 50%; transform: translateY(-50%); z-index: 89; background: var(--panel-solid); color: var(--ink); border: 1px solid var(--line); border-radius: 99px; padding: 8px 14px; font-size: 13px; font-weight: 700; text-decoration: none; opacity: .85; }
+.demo-link:hover { opacity: 1; }

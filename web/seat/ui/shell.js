@@ -58,7 +58,18 @@ export function createShell({ bus, config, airports, actions, openWhereNext }) {
   home.querySelector('.kidtoggle').onclick = () => actions.toggleKid();
 
   // Yoke QR: use the LAN IP even if the seat was opened on localhost.
-  fetch('/api/info').then(r => r.json()).then(({ ips, port }) => {
+  fetch('/api/info').then(r => r.json()).then(({ ips, port, cloud }) => {
+    if (cloud) {
+      // Hosted online: the public address works for everyone. Offer the demo controls to visitors.
+      renderQR(home.querySelector('.yoke-qr .qr'), `${location.origin}/yoke/`, 140);
+      home.querySelector('.yoke-qr small').textContent = `Scan with your phone, or open ${location.origin}/yoke/`;
+      const a = document.createElement('a');
+      a.className = 'demo-link'; a.href = '../admin/'; a.target = '_blank'; a.rel = 'noopener';
+      a.textContent = '🛠 Demo controls ↗';
+      a.title = 'Opens /admin in a new tab: jump to cruise, approach, landing…';
+      document.body.appendChild(a);
+      return;
+    }
     // Keep the address the seat was opened on if phones can reach it; otherwise (localhost, an
     // unreachable 192.0.0.x CLAT address) use the server's first reachable IP. IPv6 needs [brackets].
     const here = location.hostname.replace(/^\[|\]$/g, '');
